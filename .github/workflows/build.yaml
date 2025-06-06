@@ -8,7 +8,7 @@ on:
 
 jobs:
   build-and-upload:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     steps:
     - name: Checkout repository
@@ -22,9 +22,78 @@ jobs:
     - name: Build kernel
       run: ./build_kernel.sh
 
-    - name: Upload boot.img artifact
+    - name: Read version from file
+      id: get_version
+      run: |
+        if [ -f "version" ]; then
+          VERSION=$(cat version | tr -d '\n' | tr -d '\r')
+        else
+          VERSION="v1.0.0"
+        fi
+        echo "base_version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Base version: $VERSION"
+
+    - name: Generate unique tag
+      id: generate_tag
+      run: |
+        BASE_VERSION="${{ steps.get_version.outputs.base_version }}"
+        COUNTER=0
+        TAG="$BASE_VERSION"
+        
+        # Check if tag exists and increment counter if needed
+        while git ls-remote --tags origin | grep -q "refs/tags/$TAG$"; do
+          COUNTER=$((COUNTER + 1))
+          TAG="$BASE_VERSION-$COUNTER"
+        done
+        
+        echo "final_tag=$TAG" >> $GITHUB_OUTPUT
+        echo "Final tag: $TAG"
+
+    - name: Create boot image zip
+      run: |
+        mkdir -p release
+        zip release/boot-image-${{ steps.generate_tag.outputs.final_tag }}.zip boot.img
+        ls -la release/
+
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.generate_tag.outputs.final_tag }}
+        release_name: "Boot Image Release ${{ steps.generate_tag.outputs.final_tag }}"
+        body: |
+          🚀 **Boot Image Release ${{ steps.generate_tag.outputs.final_tag }}**
+          
+          This release contains the compiled boot.img for the Nothing Phone kernel.
+          
+          **Build Information:**
+          - Commit: ${{ github.sha }}
+          - Date: ${{ github.event.head_commit.timestamp }}
+          - Workflow: ${{ github.workflow }}
+          
+          **Installation:**
+          1. Download the boot-image zip file
+          2. Extract boot.img
+          3. Flash using fastboot: `fastboot flash boot boot.img`
+          
+          ⚠️ **Warning:** Flashing custom kernels may void your warranty and could potentially brick your device. Proceed at your own risk.
+        draft: false
+        prerelease: false
+
+    - name: Upload boot image to release
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./release/boot-image-${{ steps.generate_tag.outputs.final_tag }}.zip
+        asset_name: boot-image-${{ steps.generate_tag.outputs.final_tag }}.zip
+        asset_content_type: application/zip
+
+    - name: Upload boot.img artifact (backup)
       uses: actions/upload-artifact@v4
       with:
-        name: boot-image
-        path: boot.img # This path is relative to the root of your GitHub Actions workspace.
-                      # Ensure your Docker command places boot.img here.
+        name: boot-image-${{ steps.generate_tag.outputs.final_tag }}
+        path: boot.img
