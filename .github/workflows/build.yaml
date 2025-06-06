@@ -20,7 +20,7 @@ jobs:
       run: sudo apt update && sudo apt install -y make ccache clang flex bison llvm lld libssl-dev bc lz4 fakeroot cpio patch
 
     - name: Build kernel
-      run: ./build_kernel.sh
+      run: ./build_kernel.sh -j32
 
     - name: Read version from file
       id: get_version
